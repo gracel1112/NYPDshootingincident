@@ -1,0 +1,122 @@
+---
+title: "NYPD Shooting Incident"
+author: "Jia Liu"
+date: "2023-04-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load-packages, include=FALSE}
+library(tidyverse)
+library(lubridate)
+```
+## Importing data
+
+This dataset lists every shooting incident that happened in NYC from 2006 to 2021. Specifically, it contains information on the shooting date/time, location, and the demographic information on both perpetrators and victims.
+
+Let's import the data first:
+
+```{r import}
+nypd <- read.csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+```
+## Data wrangling
+
+There are 19 columns, of which I'll only need the occurrence date, boroughs, shooting outcome and the demographics of the perpetrator and victim for my analysis. 
+
+```{r tidyup}
+nypd <- nypd %>%
+select(OCCUR_DATE, BORO, STATISTICAL_MURDER_FLAG, PERP_RACE, PERP_SEX, PERP_AGE_GROUP, VIC_RACE, VIC_SEX, VIC_AGE_GROUP) %>%
+mutate(DATE = mdy(OCCUR_DATE))
+head(nypd)
+```
+ 
+There's a large amount of missing values in PERP_RACE, PERP_SEX, and PERP_AGE_GROUP because the perpetrators may not always be identified. I'll replace them all with "UNKNOWN".Then, I'll convert the columns to the appropriate data types.
+
+```{r convert}
+nypd[nypd == ''] <- NA
+nypd <- nypd %>%
+  replace_na(list(PERP_RACE = "UNKNOWN", PERP_SEX = "U", PERP_AGE_GROUP = "UNKNOWN"))
+nypd$BORO = as.factor(nypd$BORO)
+nypd$STATISTICAL_MURDER_FLAG = as.factor(nypd$STATISTICAL_MURDER_FLAG)
+nypd$PERP_RACE = as.factor(nypd$PERP_RACE)
+nypd$PERP_SEX = as.factor(nypd$PERP_SEX)
+nypd$PERP_AGE_GROUP = as.factor(nypd$PERP_AGE_GROUP)
+nypd$VIC_RACE = as.factor(nypd$VIC_RACE)
+nypd$VIC_SEX = as.factor(nypd$VIC_SEX)
+nypd$VIC_AGE_GROUP = as.factor(nypd$VIC_AGE_GROUP)
+summary(nypd)
+```
+```{r removeoutliers}
+nypd = subset(nypd, PERP_AGE_GROUP != "1020" & PERP_AGE_GROUP != "224" & PERP_AGE_GROUP != "940")
+```
+
+I'll create a dataframe nypd_cases to examine the overall trend of shooting incidents from 2016 to 2021.
+
+```{r cases, echo= FALSE}
+nypd_cases <- nypd %>%
+select(DATE, BORO) %>%
+mutate(YEAR = year(DATE)) %>%
+select(YEAR, BORO) %>%
+mutate(CASES = 1)
+```
+
+```{r casesbyboro}
+nypd_cases <- nypd_cases %>% group_by(BORO, YEAR) %>% summarize(CASES =sum(CASES))
+```
+
+## Visualization
+Let's plot the cases by boroughs and visualize the data.
+```{r vis1, echo = FALSE}
+nypd_cases %>%
+ggplot(aes(x = YEAR, y = CASES, color = BORO)) + geom_line() + theme(legend.position = "bottom") + labs(title = "Shooting incidents in NYC")
+```
+```{r vis2, echo = FALSE}
+nypd %>%
+ggplot(aes(BORO)) + geom_bar(aes(fill = STATISTICAL_MURDER_FLAG)) + theme(legend.position = "bottom") + labs(title = "Murder rate by boroughs")
+```
+
+
+Then, I'll visualize the demographics of perpetrators and victims respectively.
+```{r perprace}
+ggplot(nypd) + geom_bar(aes(y = PERP_RACE))
+```
+```{r perpsex}
+ggplot(nypd) + geom_bar(aes(y = PERP_SEX))
+```
+```{r perpage}
+ggplot(nypd) + geom_bar(aes(y = PERP_AGE_GROUP))
+```
+```{r vicrace}
+ggplot(nypd) + geom_bar(aes(y = VIC_RACE))
+```
+```{r vicsex}
+ggplot(nypd) + geom_bar(aes(y = VIC_SEX))
+```
+```{r vicage}
+ggplot(nypd) + geom_bar(aes(y = VIC_AGE_GROUP))
+```
+
+## Analysis
+As we can see from the graphs above, the overall trend of shooting incidents in NYC is slowly decreasing until 2018 where it took a sharp turn, increased dramatically and peaked in 2020.
+Across the five boroughs, Brooklyn has remained number one in terms of shooting incidents, followed by Bronx, Queens, Manhattan, and Staten Island. However, in terms of murder rate, Staten Island surpassed all the other boroughs as can be seen in the table below.
+```{r murderrate}
+murder_rate = table(nypd$BORO, nypd$STATISTICAL_MURDER_FLAG)
+murder_rate
+```
+Black males between age 18 and 44 are most likely the perpetrators of shooting crimes and equally likely to be the victims of such crimes at the same time. More resources should be allocated to educating and preventing this demographic group from committing gun violence.
+
+## Model
+I'll use a logistic regression model to predict the outcome of a shooting incident based on the demographic information of the perpetrator and the victim.
+As shown in the output below, PERP_SEXU, PERP_AGE_GROUP25-44, PERP_AGE_GROUP45-64, PERP_AGE_GROUPUNKNOWN, VIC_AGE_GROUP18-24, VIC_AGE_GROUP25-44, VIC_AGE_GROUP45-64 and VIC_AGE_GROUP65+ are statistically significant predictors of whether a shooting crime will result in murder. 
+```{r model}
+mod <- glm(STATISTICAL_MURDER_FLAG ~ PERP_RACE + PERP_SEX + PERP_AGE_GROUP + VIC_RACE + VIC_SEX + VIC_AGE_GROUP, family="binomial", data=nypd)
+summary(mod)
+```
+
+## Identify bias
+One potential source of bias in this analysis is the lack of information on population and geography of the boroughs. Brooklyn may seem to be the most dangerous neighborhood in NYC judging from the total number of shooting incidents, but we really don't know for sure until we factor in the population and land area of these boroughs. 
+We can also question the reporting mechanism of these crimes. Black males are traditionally a very vulnerable group in the criminal justice system. There are a lot of prominent evidences as to how black males have been more targeted and mistreated in the legislative and law enforcement process.
+We should bear these bias in mind when analyzing and interpreting the results of how the data truly reflect the shooting crime landscape of NYC.
